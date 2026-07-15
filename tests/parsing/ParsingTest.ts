@@ -42,6 +42,10 @@ describe("parsing tests", () => {
                 if (pdf === "2026_Josie_03.pdf") {
                     expect(bulletin.info.final).toBe(true);
                     expect(bulletin.cyclone.center).toEqual({ lat: 14.5, lon: 134.6 });
+                    expect(source.tabulaTimings).toEqual(expect.arrayContaining([
+                        expect.objectContaining({ mode: "stream", status: "succeeded" }),
+                        expect.objectContaining({ mode: "lattice", status: "succeeded" })
+                    ]));
                 }
             }
         });

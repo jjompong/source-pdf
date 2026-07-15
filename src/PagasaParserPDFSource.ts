@@ -5,6 +5,13 @@ import * as url from "url";
 import {search, searchAll} from "./Utilities";
 import type {TabulaJSONOutput} from "./Tabula";
 
+export interface TabulaTiming {
+    mode: "stream" | "lattice";
+    status: string;
+    durationMs: number;
+    detail?: string;
+}
+
 export default class PagasaParserPDFSource extends PagasaParserSource {
 
     /**
@@ -23,6 +30,7 @@ export default class PagasaParserPDFSource extends PagasaParserSource {
 
     tabulaStreamData: TabulaJSONOutput;
     tabulaLatticeData: TabulaJSONOutput;
+    readonly tabulaTimings: TabulaTiming[] = [];
 
     private async runTabula(mode: "stream" | "lattice"): Promise<TabulaJSONOutput> {
         const startedAt = Date.now();
@@ -89,13 +97,17 @@ export default class PagasaParserPDFSource extends PagasaParserSource {
         startedAt: number,
         detail?: string
     ): void {
-        console.log(JSON.stringify({
-            event: "pagasa_parser.tabula",
-            file: path.basename(this.path),
+        const timing: TabulaTiming = {
             mode,
             status,
             durationMs: Date.now() - startedAt,
             detail: detail?.replace(/\s+/g, " ").slice(0, 300)
+        };
+        this.tabulaTimings.push(timing);
+        console.log(JSON.stringify({
+            event: "pagasa_parser.tabula",
+            file: path.basename(this.path),
+            ...timing
         }));
     }
 

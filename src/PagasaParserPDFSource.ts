@@ -25,6 +25,7 @@ export default class PagasaParserPDFSource extends PagasaParserSource {
     tabulaLatticeData: TabulaJSONOutput;
 
     private async runTabula(mode: "stream" | "lattice"): Promise<TabulaJSONOutput> {
+        const startedAt = Date.now();
         const modeFlag = mode === "stream" ? "-t" : "-l";
         const tabula = childProcess.spawn("java", [
             "-Dfile.encoding=UTF8", "-jar", path.resolve(__dirname, "..", "bin", "tabula.jar"),
@@ -48,16 +49,19 @@ export default class PagasaParserPDFSource extends PagasaParserSource {
         return new Promise<TabulaJSONOutput>((resolve, reject) => {
             tabula.on("error", (error) => {
                 clearTimeout(timeout);
+                this.logTabula(mode, "start_failed", startedAt, error.message);
                 reject(new Error(`Unable to start Tabula ${mode} extraction: ${error.message}`));
             });
             tabula.on("close", (code) => {
                 clearTimeout(timeout);
                 const stderr = Buffer.concat(stderrChunks).toString("utf8").trim();
                 if (timedOut) {
+                    this.logTabula(mode, "timeout", startedAt);
                     reject(new Error(`Tabula ${mode} extraction timed out after ${timeoutMs}ms.`));
                     return;
                 }
                 if (code !== 0) {
+                    this.logTabula(mode, "failed", startedAt, stderr);
                     reject(new Error(
                         `Tabula ${mode} extraction failed with exit code ${code}` +
                         `${stderr ? `: ${stderr}` : "."}`
@@ -67,13 +71,32 @@ export default class PagasaParserPDFSource extends PagasaParserSource {
 
                 const output = Buffer.concat(stdoutChunks).toString("utf8");
                 try {
-                    resolve(JSON.parse(output));
+                    const parsed = JSON.parse(output);
+                    this.logTabula(mode, "succeeded", startedAt);
+                    resolve(parsed);
                 } catch (error) {
                     const message = error instanceof Error ? error.message : String(error);
+                    this.logTabula(mode, "invalid_json", startedAt, message);
                     reject(new Error(`Tabula ${mode} extraction returned invalid JSON: ${message}`));
                 }
             });
         });
+    }
+
+    private logTabula(
+        mode: "stream" | "lattice",
+        status: string,
+        startedAt: number,
+        detail?: string
+    ): void {
+        console.log(JSON.stringify({
+            event: "pagasa_parser.tabula",
+            file: path.basename(this.path),
+            mode,
+            status,
+            durationMs: Date.now() - startedAt,
+            detail: detail?.replace(/\s+/g, " ").slice(0, 300)
+        }));
     }
 
     async getTabulaStreamData(): Promise<TabulaJSONOutput> {

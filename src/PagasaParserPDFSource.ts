@@ -208,10 +208,20 @@ export default class PagasaParserPDFSource extends PagasaParserSource {
             throw new Error("Unable to extract the tropical cyclone title from the PDF.");
 
         const title = titleCell.text.trim();
-        const titleMatch = /^(?:(.*)\s|^)[“"]?([^()]+?)["”]?(?:\s\((.+?)\))?$/.exec(title);
-        if (titleMatch == null)
-            throw new Error(`Unable to extract tropical cyclone metadata from title: ${title}`);
-        const [, category, name, internationalName] = titleMatch;
+        const formerCycloneMatch = /^Low Pressure Area\s+\(formerly\s+[“"]?([^"”]+)["”]?\)$/i.exec(title);
+        let category: string;
+        let name: string;
+        let internationalName: string;
+        if (formerCycloneMatch) {
+            category = "Low Pressure Area";
+            name = formerCycloneMatch[1].trim();
+            internationalName = undefined;
+        } else {
+            const titleMatch = /^(?:(.*)\s|^)[“"]?([^()]+?)["”]?(?:\s\((.+?)\))?$/.exec(title);
+            if (titleMatch == null)
+                throw new Error(`Unable to extract tropical cyclone metadata from title: ${title}`);
+            [, category, name, internationalName] = titleMatch;
+        }
 
         // Some PAGASA bulletins omit one or both degree symbols (for example,
         // JOSIE TCB #3F uses "14.5°N, 134.6E"). Search both Tabula modes

@@ -6,6 +6,12 @@ This plugin for [pagasa-parser](https://github.com/pagasa-parser/pagasa-parser) 
 
 This package requires Java to be available in the PATH, as it relies on [tabula-java](https://github.com/tabulapdf/tabula-java). This package does not depend on Log4j.
 
+This Maybagyoba-maintained fork tracks the original
+[`pagasa-parser/source-pdf`](https://github.com/pagasa-parser/source-pdf)
+project. Each Tabula mode has a bounded runtime controlled by
+`PAGASA_PARSER_TABULA_TIMEOUT_MS` (default: 45000), and emits a structured
+`pagasa_parser.tabula` log with its mode, status, and duration.
+
 The parser accepts PAGASA coordinate layouts with or without degree symbols on
 either coordinate (for example, both `14.5°N, 134.6°E` and
 `14.5°N, 134.6E`). Missing required bulletin fields produce explicit parse

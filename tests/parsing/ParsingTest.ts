@@ -36,8 +36,19 @@ describe("parsing tests", () => {
                         JSON.stringify(await source.parse()));
                 }).rejects.toThrow();
             } else {
-                fs.writeFileSync(path.join(outDir, "data.json"),
-                    JSON.stringify(await source.parse()));
+                const bulletin = await source.parse();
+                fs.writeFileSync(path.join(outDir, "data.json"), JSON.stringify(bulletin));
+
+                if (pdf === "2026_Josie_03.pdf") {
+                    expect(bulletin.info.final).toBe(true);
+                    expect(bulletin.cyclone.category).toBe("Low Pressure Area");
+                    expect(bulletin.cyclone.name).toBe("JOSIE");
+                    expect(bulletin.cyclone.center).toEqual({ lat: 14.5, lon: 134.6 });
+                    expect(source.tabulaTimings).toEqual(expect.arrayContaining([
+                        expect.objectContaining({ mode: "stream", status: "succeeded" }),
+                        expect.objectContaining({ mode: "lattice", status: "succeeded" })
+                    ]));
+                }
             }
         });
     }

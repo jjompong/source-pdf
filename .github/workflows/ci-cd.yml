@@ -1,34 +1,42 @@
-name: CD
+name: CI
 
 on:
-    push:
-    pull_request:
+  push:
+    branches: [master]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: read
 
 jobs:
-    audit:
-        name: Build, Audit, Deploy
-        runs-on: ubuntu-latest
-        env:
-            NODE_ENV: development
+  test:
+    name: Test and build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-        steps:
-            -   name: Checkout code
-                uses: actions/checkout@v2
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
 
-            -   name: Setup Node
-                uses: actions/setup-node@v2
-                with:
-                    node-version: '16.x'
-                    registry-url: 'https://registry.npmjs.org'
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
 
-            -   name: Install dependencies
-                run: npm ci
+      - name: Install dependencies
+        run: npm ci
 
-            -   name: Perform tests
-                run: npm test
+      - name: Run tests
+        run: npm test -- --runInBand
 
-            -   name: Publish
-                if: github.ref_type == 'tag'
-                run: npm publish
-                env:
-                    NODE_AUTH_TOKEN: ${{ secrets.NPM_PUBLISH_KEY }}
+      - name: Build package
+        run: npm run build
+
+      - name: Verify package contents
+        run: npm pack --dry-run

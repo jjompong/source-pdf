@@ -20,11 +20,11 @@
         "coverage:minimal": "jest --coverage",
         "prepack": "npm run clean && npm run build",
         "clean": "rimraf build",
-        "prepare": "husky install"
+        "prepare": "npm run build"
     },
     "repository": {
         "type": "git",
-        "url": "git+https://github.com/pagasa-parser/source-xml.git"
+        "url": "git+https://github.com/jjompong/source-pdf.git"
     },
     "keywords": [
         "scraper",
@@ -36,9 +36,9 @@
     "author": "Chlod Alejandro <chlod@chlod.net> (https://chlod.net)",
     "license": "Apache-2.0",
     "bugs": {
-        "url": "https://github.com/pagasa-parser/source-xml/issues"
+        "url": "https://github.com/jjompong/source-pdf/issues"
     },
-    "homepage": "https://github.com/pagasa-parser/source-xml#readme",
+    "homepage": "https://github.com/jjompong/source-pdf#readme",
     "engines": {
         "node": ">=13"
     },

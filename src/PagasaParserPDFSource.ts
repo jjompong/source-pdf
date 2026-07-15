@@ -15,7 +15,7 @@ export default class PagasaParserPDFSource extends PagasaParserSource {
     constructor(private path: string) {
         super();
         try {
-            childProcess.execSync("java --version");
+            childProcess.execFileSync("java", ["-version"], { stdio: "ignore" });
         } catch (e) {
             throw new Error("Cannot find Java in PATH. Java is required for this package to function.");
         }
@@ -24,44 +24,70 @@ export default class PagasaParserPDFSource extends PagasaParserSource {
     tabulaStreamData: TabulaJSONOutput;
     tabulaLatticeData: TabulaJSONOutput;
 
+    private async runTabula(mode: "stream" | "lattice"): Promise<TabulaJSONOutput> {
+        const modeFlag = mode === "stream" ? "-t" : "-l";
+        const tabula = childProcess.spawn("java", [
+            "-Dfile.encoding=UTF8", "-jar", path.resolve(__dirname, "..", "bin", "tabula.jar"),
+            "-p", "all", modeFlag, "-f", "JSON", this.path
+        ]);
+        const stdoutChunks: Buffer[] = [];
+        const stderrChunks: Buffer[] = [];
+        const configuredTimeout = Number(process.env.PAGASA_PARSER_TABULA_TIMEOUT_MS ?? 45000);
+        const timeoutMs = Number.isFinite(configuredTimeout) && configuredTimeout > 0
+            ? configuredTimeout
+            : 45000;
+        let timedOut = false;
+        const timeout = setTimeout(() => {
+            timedOut = true;
+            tabula.kill("SIGKILL");
+        }, timeoutMs);
+
+        tabula.stdout.on("data", (data) => stdoutChunks.push(Buffer.from(data)));
+        tabula.stderr.on("data", (data) => stderrChunks.push(Buffer.from(data)));
+
+        return new Promise<TabulaJSONOutput>((resolve, reject) => {
+            tabula.on("error", (error) => {
+                clearTimeout(timeout);
+                reject(new Error(`Unable to start Tabula ${mode} extraction: ${error.message}`));
+            });
+            tabula.on("close", (code) => {
+                clearTimeout(timeout);
+                const stderr = Buffer.concat(stderrChunks).toString("utf8").trim();
+                if (timedOut) {
+                    reject(new Error(`Tabula ${mode} extraction timed out after ${timeoutMs}ms.`));
+                    return;
+                }
+                if (code !== 0) {
+                    reject(new Error(
+                        `Tabula ${mode} extraction failed with exit code ${code}` +
+                        `${stderr ? `: ${stderr}` : "."}`
+                    ));
+                    return;
+                }
+
+                const output = Buffer.concat(stdoutChunks).toString("utf8");
+                try {
+                    resolve(JSON.parse(output));
+                } catch (error) {
+                    const message = error instanceof Error ? error.message : String(error);
+                    reject(new Error(`Tabula ${mode} extraction returned invalid JSON: ${message}`));
+                }
+            });
+        });
+    }
+
     async getTabulaStreamData(): Promise<TabulaJSONOutput> {
         if (this.tabulaStreamData != null)
             return this.tabulaStreamData;
 
-        const tabulaStream = childProcess.spawn("java", [
-            "-Dfile.encoding=UTF8", "-jar", path.resolve(__dirname, "..", "bin", "tabula.jar"),
-            "-p", "all", "-t", "-f", "JSON", this.path
-        ]);
-        const tabulaStreamChunks: Buffer[] = [];
-        tabulaStream.stdout.on("data", (data) => {
-            tabulaStreamChunks.push(Buffer.from(data));
-        });
-        tabulaStream.stderr.on("data", (data) => {
-            console.log(`err: ${data}`);
-        });
-        return new Promise<void>((res) => { tabulaStream.on("close", res); })
-            .then(() => this.tabulaStreamData =
-                JSON.parse(Buffer.concat(tabulaStreamChunks).toString("utf8")));
+        return this.tabulaStreamData = await this.runTabula("stream");
     }
 
     async getTabulaLatticeData(): Promise<TabulaJSONOutput> {
         if (this.tabulaLatticeData != null)
             return this.tabulaLatticeData;
 
-        const tabulaData = childProcess.spawn("java", [
-            "-Dfile.encoding=UTF8", "-jar", path.resolve(__dirname, "..", "bin", "tabula.jar"),
-            "-p", "all", "-l", "-f", "JSON", this.path
-        ]);
-        const tabulaLatticeChunks: Buffer[] = [];
-        tabulaData.stdout.on("data", (data) => {
-            tabulaLatticeChunks.push(Buffer.from(data));
-        });
-        tabulaData.stderr.on("data", (data) => {
-            console.log(`err: ${data}`);
-        });
-        return new Promise<void>((res) => { tabulaData.on("close", res); })
-            .then(() => this.tabulaLatticeData =
-                JSON.parse(Buffer.concat(tabulaLatticeChunks).toString("utf8")));
+        return this.tabulaLatticeData = await this.runTabula("lattice");
     }
 
     async getTabulaData(): Promise<[TabulaJSONOutput, TabulaJSONOutput]> {
@@ -135,19 +161,38 @@ export default class PagasaParserPDFSource extends PagasaParserSource {
 
     extractCyclone(stream: TabulaJSONOutput, lattice: TabulaJSONOutput): Cyclone {
         const headerCell = search(stream, /Tropical Cyclone Bulletin N[ro]\. (\d+)/gi);
+        if (headerCell == null)
+            throw new Error("Unable to extract the tropical cyclone bulletin header from the PDF.");
+
         let titleCell = headerCell.next();
 
-        while (titleCell.text.trim().length == 0)
+        while (titleCell != null && titleCell.text.trim().length == 0)
             titleCell = titleCell.next();
 
-        const title = titleCell.text.trim();
-        const [, category, name, internationalName] = /^(?:(.*)\s|^)[“"]?([^()]+?)["”]?(?:\s\((.+?)\))?$/g.exec(title);
+        if (titleCell == null)
+            throw new Error("Unable to extract the tropical cyclone title from the PDF.");
 
-        const positionMatch = search(lattice, /([0-9.]+)°([NS]),\s?([0-9.]+)°([WE])/gi).match;
+        const title = titleCell.text.trim();
+        const titleMatch = /^(?:(.*)\s|^)[“"]?([^()]+?)["”]?(?:\s\((.+?)\))?$/.exec(title);
+        if (titleMatch == null)
+            throw new Error(`Unable to extract tropical cyclone metadata from title: ${title}`);
+        const [, category, name, internationalName] = titleMatch;
+
+        // Some PAGASA bulletins omit one or both degree symbols (for example,
+        // JOSIE TCB #3F uses "14.5°N, 134.6E"). Search both Tabula modes
+        // because table extraction varies between PDF generator versions.
+        const positionPattern = /([0-9]+(?:\.[0-9]+)?)\s*°?\s*([NS])\s*,?\s*([0-9]+(?:\.[0-9]+)?)\s*°?\s*([WE])/gi;
+        const positionCell = search(lattice, positionPattern) ?? search(stream, positionPattern);
+        if (positionCell == null)
+            throw new Error("Unable to extract tropical cyclone center coordinates from the PDF.");
+
+        const positionMatch = positionCell.match;
         const position = {
             lat: +positionMatch[1] * (positionMatch[2] === "S" ? -1 : 1),
             lon: +positionMatch[3] * (positionMatch[4] === "W" ? -1 : 1),
         };
+        if (Math.abs(position.lat) > 90 || Math.abs(position.lon) > 180)
+            throw new Error(`Extracted tropical cyclone coordinates are outside valid ranges: ${position.lat}, ${position.lon}`);
 
         const movementMatch = search(lattice, /present\s?movement(?:.*([\r\n]*.+))?/gi);
         let movementString: string;
